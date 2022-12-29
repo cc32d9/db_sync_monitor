@@ -1,0 +1,84 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use Getopt::Long;
+use DBI;
+use DateTime;
+use DateTime::Format::MySQL;
+
+my $warn_limit = 5.0;
+my $crit_limit = 30.0;
+
+my $db_name;
+my $db_host;
+my $db_port = 3306;
+my $db_user;
+my $db_password;
+
+my $ok = GetOptions
+    (
+     'warn=f'    => \$warn_limit,
+     'crit=f'    => \$crit_limit,
+     'database=s' => \$db_name,
+     'dbhost=s'  => \$db_host,
+     'dbport=i'  => \$db_port,
+     'dbuser=s'  => \$db_user,
+     'dbpw=s'    => \$db_password,
+    );
+
+
+if( not $ok or scalar(@ARGV) > 0 or not $db_name or not $db_host or not $db_user or not $db_password )
+{
+    print STDERR "Usage: $0 --database=DBNAME --dbhost=DBHOST --dbuser=DBUSER --dbpw=DBPASSWORD [options...]\n",
+        "The script checks block_time from SYNC table and compares it to host time.\n",
+        "Options:\n",
+        "  --warn=X           \[$warn_limit\] warning level, float in seconds\n",
+        "  --crit=X           \[$crit_limit\] critical level, float in seconds\n";
+
+    exit 1;
+}
+
+my $dsn = 'dbi:mysql:dbname=' . $db_name . ';host=' . $db_host . ';port=' . $db_port;
+
+my $dbh = DBI->connect($dsn, $db_user, $db_password,
+                       {'RaiseError' => 1, AutoCommit => 0});
+bailout('Cannot connect to the database', $DBI::errstr) unless defined($dbh);
+    
+
+my $res = $dbh->selectall_arrayref('SELECT MIN(block_time) FROM SYNC');
+$dbh->disconnect();
+
+bailout('SYNC table is empty', '') unless scalar(@{$res}) > 0;
+
+my $bt = eval { DateTime::Format::MySQL->parse_datetime($res->[0][0]) };
+bailout('Date/time parsing error', $@) if $@;
+$bt->set_time_zone('UTC');
+
+my $now = DateTime->now('time_zone' => 'UTC');
+my $diff = $now->subtract_datetime_absolute($bt)->in_units('nanoseconds')/1.0e9;
+
+my $exitcode = 0;
+my $status = 'OK';
+if( $diff > $crit_limit )
+{
+    $exitcode = 2;
+    $status = 'CRITICAL';
+}
+elsif( $diff > $warn_limit )
+{
+    $exitcode = 1;
+    $status = 'WARNING';
+}
+
+printf("DB_BLOCKTIME %s - %fs difference|time_diff=%f\n", $status, $diff, $diff);
+exit($exitcode);
+
+
+
+sub bailout
+{
+    my ($error, $msg) = @_;
+    printf("%s: %s\n", $error, $msg);
+    exit(2);
+}
