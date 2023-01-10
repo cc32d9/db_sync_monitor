@@ -15,6 +15,7 @@ my $db_host;
 my $db_port = 5432;
 my $db_user;
 my $db_password;
+my $network;
 
 my $ok = GetOptions
     (
@@ -24,6 +25,7 @@ my $ok = GetOptions
      'dbhost=s'  => \$db_host,
      'dbuser=s'  => \$db_user,
      'dbpw=s'    => \$db_password,
+     'network=s' => \$network,
     );
 
 
@@ -33,7 +35,8 @@ if( not $ok or scalar(@ARGV) > 0 or not $db_name or not $db_host or not $db_user
         "The script checks block_time from SYNC table and compares it to host time.\n",
         "Options:\n",
         "  --warn=X           \[$warn_limit\] warning level, float in seconds\n",
-        "  --crit=X           \[$crit_limit\] critical level, float in seconds\n";
+        "  --crit=X           \[$crit_limit\] critical level, float in seconds\n",
+        "  --network=X        optional network name\n";
 
     exit 1;
 }
@@ -43,12 +46,17 @@ my $dsn = 'dbi:Pg:dbname=' . $db_name . ';host=' . $db_host . ';port=' . $db_por
 my $dbh = DBI->connect($dsn, $db_user, $db_password,
                        {'RaiseError' => 1, AutoCommit => 0});
 bailout('Cannot connect to the database', $DBI::errstr) unless defined($dbh);
-    
 
-my $res = $dbh->selectall_arrayref('SELECT MIN(block_time) FROM SYNC');
+my $query = 'SELECT MIN(block_time) FROM SYNC';
+if( defined($network) )
+{
+    $query .= ' WHERE network=\'' . $network . '\'';
+}
+
+my $res = $dbh->selectall_arrayref($query);
 $dbh->disconnect();
 
-bailout('SYNC table is empty', '') unless scalar(@{$res}) > 0;
+bailout('SYNC table is empty', '') unless defined($res->[0][0]);
 
 my $bt = eval { DateTime::Format::Pg->parse_datetime($res->[0][0]) };
 bailout('Date/time parsing error', $@) if $@;
