@@ -1,0 +1,90 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use JSON;
+use DBI;
+use DateTime;
+use DateTime::Format::Pg;
+use Sys::Syslog qw(:standard :macros);
+use IO::File;
+
+
+my $proxy_name = $ENV{'HAPROXY_PROXY_NAME'};
+bailout('Environment variable missing', 'HAPROXY_PROXY_NAME') unless defined($proxy_name);
+
+my $config;
+
+my $cfgfile = '/etc/default/h_check_db_sync_' . $proxy_name . '.json';
+if( -r $cfgfile )
+{
+    eval {
+        my $fh = IO::File->new($cfgfile) or die($!);
+        $config = decode_json(join('', $fh->getlines()));
+        if( not defined $config->{'critical_time_behind'} )
+        {
+            $config->{'critical_time_behind'} = 60;
+        }
+        foreach my $key('db_name', 'db_user', 'db_password')
+        {
+            if( not defined $config->{$key} )
+            {
+                bailout('Config file', sprintf('missing mandatory parameter %s in %s', $key, $cfgfile));
+            }
+        }
+    };
+
+    if( $@ )
+    {
+        bailout('Config file', sprintf('error reading %s: %s', $cfgfile, $@));
+    }
+}
+else
+{
+    bailout('Config file', 'No such file: ' . $cfgfile);
+}
+
+
+
+my $dsn = sprintf('dbi:Pg:dbname=%s;host=%s;port=%d',
+                  $config->{'db_name'}, $ENV{'HAPROXY_SERVER_ADDR'}, $ENV{'HAPROXY_SERVER_PORT'});
+
+my $dbh = DBI->connect($dsn, $config->{'db_user'}, $config->{'db_password'},
+                       {'RaiseError' => 1, AutoCommit => 0});
+bailout('Cannot connect to the database', $DBI::errstr) unless defined($dbh);
+
+my $query = 'SELECT MAX(block_time) FROM SYNC';
+if( defined($config->{'network'}) )
+{
+    $query .= ' WHERE network=\'' . $config->{'network'} . '\'';
+}
+
+my $res = $dbh->selectall_arrayref($query);
+$dbh->disconnect();
+
+bailout('SYNC table is empty', '') unless defined($res->[0][0]);
+
+my $bt = eval { DateTime::Format::Pg->parse_datetime($res->[0][0]) };
+bailout('Date/time parsing error', $@) if $@;
+$bt->set_time_zone('UTC');
+
+my $now = DateTime->now('time_zone' => 'UTC');
+my $diff = $now->subtract_datetime_absolute($bt)->in_units('nanoseconds')/1.0e9;
+if( $diff > $config->{'critical_time_behind'} )
+{
+    bailout('Service Health', 'SYNC is ' . $diff . ' seconds behind');
+}
+
+exit(0);
+
+
+
+sub bailout
+{
+    my ($error, $msg) = @_;
+    my $errmsg = sprintf('%s %s: %s', $ENV{'HAPROXY_SERVER_NAME'}, $error, $msg);
+    print STDERR $0, ': ', $errmsg, "\n";
+    openlog($0, "", "local0");
+    syslog(LOG_CRIT, $errmsg);
+    exit(1);
+}
