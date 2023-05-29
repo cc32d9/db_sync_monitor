@@ -10,7 +10,7 @@ time.
 
 
 ```
-apt install -y git libdatetime-format-iso8601-perl libdbi-perl libdbd-pg-perl libdbd-mysql-perl libdatetime-format-pg-perl libdatetime-format-mysql-perl
+apt install -y git libdatetime-format-iso8601-perl libdbi-perl libdbd-pg-perl libdbd-mysql-perl libdatetime-format-pg-perl libdatetime-format-mysql-perl libjson-xs-perl libjson-perl
 
 git clone https://github.com/cc32d9/db_sync_monitor.git /opt/db_sync_monitor
 
