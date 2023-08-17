@@ -45,9 +45,8 @@ if( not $ok or scalar(@ARGV) > 0 or not $db_name or not $db_host or not $db_user
 
 my $dsn = 'dbi:mysql:dbname=' . $db_name . ';host=' . $db_host . ';port=' . $db_port;
 
-my $dbh = DBI->connect($dsn, $db_user, $db_password,
-                       {'RaiseError' => 1, AutoCommit => 0});
-bailout('Cannot connect to the database', $DBI::errstr) unless defined($dbh);
+my $dbh = eval { DBI->connect($dsn, $db_user, $db_password, {'RaiseError' => 1, AutoCommit => 0}) };
+bailout('Cannot connect to the database', $DBI::errstr) if $@;
     
 my $query = 'SELECT MIN(block_time) FROM SYNC';
 if( defined($network) )
